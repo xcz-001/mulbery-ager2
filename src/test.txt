@@ -1,0 +1,40 @@
+
+  // openServo();
+  // updateStatusLine();
+
+  // delay(TEST_DELAY); // Keep servo open for 5 seconds
+  // closeServo();
+  // updateStatusLine();
+
+  // delay(TEST_DELAY);
+
+  // turnOnCoolingSystem();
+  // updateStatusLine();
+
+  // delay(TEST_DELAY); // Wait for 5 seconds
+  // turnOffCoolingSystem();
+  // updateStatusLine();
+
+  // delay(TEST_DELAY);
+
+  // turnOnRecirculatingFans();
+  // updateStatusLine();
+
+  // delay(TEST_DELAY); // Wait for 5 seconds
+  // turnOffRecirculatingFans();
+  // updateStatusLine();
+
+  // delay(TEST_DELAY);
+
+  // turnOnMistingPump();
+  // updateStatusLine();
+
+  // delay(TEST_DELAY); // Wait for 5 seconds
+  // updateStatusLine();
+
+  // turnOffMistingPump();
+  // delay(TEST_DELAY);
+  // updateStatusLine();
+
+  // updateStatusLine();
+  // // Periodically read sensors and log data
