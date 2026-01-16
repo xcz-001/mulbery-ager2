@@ -16,37 +16,37 @@
 --------------------------------------------
 
 ## 🧰 Hardware Used
-- Arduino Mega 2560  
+- Arduino Mega 2560
 <img src="images/mega.png" width="480" height="100%">
 
-- DHT22 (x2)  
+- DHT22 (x2)
 <img src="images/DHT22.png" width="480" height="100%">
 
-- DS3231 RTC (CR22 Battery)  
+- DS3231 RTC (CR22 Battery)
 <img src="images/rtc.png" width="480" height="120%">
 
-- I2C LCD (20x4)  
+- I2C LCD (20x4)
 <img src="images/lcd.png" width="480" height="100%">
 
-- SD Card Module (SPI)  
+- SD Card Module (SPI)
 <img src="images/sd.png" width="480" height="120%">
 
-- Relays (Pump, Motor, Fans)  
+- Relays (Pump, Motor, Fans)
 <img src="images/4relay.png" width="480" height="100%">
 
-- SSR relay  
+- SSR relay
 <img src="images/ssr.png" width="480" height="100%">
 
-- Servo Motor  
+- Servo Motor
 <img src="images/servo.png" width="480" height="100%">
 
-- Push Button  
+- Push Button
 <img src="images/button.png" width="480" height="120%">
 
-- Emergency Off switch  
+- Emergency Off switch
 <img src="images/es.png" width="480" height="100%">
 
-- Main Power Switch  
+- Main Power Switch
 <img src="images/main.png" width="480" height="100%">
 
 
@@ -192,6 +192,12 @@ TERMINAL BLOCK 2
 - PWM pin incorrect
 - External power missing
 
+---
+## VERY IMPORTANT REMINDER
+
+- Before removing the sd card for data extraction, TURN OFF THE PROTOTYPE FIRST!
+
+- Before removing, Testing any module or any component, MAKE SURE TO CUT OFF POWER FIRST!
 
 
 

@@ -22,7 +22,7 @@
 #define LAST_LOGGED_TIME_ADDRESS 80    // EEPROM address to store last data logged time
 
 /* ===================== OPERATION VARIABLES ===================== */
-#define UNDER_DEVELOPMENT 1
+#define UNDER_DEVELOPMENT 1    // 1 = dev, 0 = prod
 
 #if UNDER_DEVELOPMENT
 
@@ -35,7 +35,6 @@
   #define SERVO_OPEN_ANGLE 180
   #define SERVO_CLOSE_ANGLE 0
 
-
 #else
 
   #define EXHAUST_OPEN_INTERVAL_MINUTES 30
@@ -44,6 +43,8 @@
   #define DRUM_ROTATION_DURATION_MINUTES 1
   #define DATA_LOG_INTERVAL_MINUTES 10
   #define SETPOINT_TEMPERATURE_C 23.0
+  #define SERVO_OPEN_ANGLE 180
+  #define SERVO_CLOSE_ANGLE 0
 
 #endif
 
@@ -98,8 +99,8 @@ uint8_t treatmentMax[4] = {0, 75, 85, 95}; // humidity ranges maxmin
 
 unsigned long menuLastActive = 0; // timestamp of last menu activity
 /* ===================== PIN DEFINITIONS ===================== */
-#define DHT1_PIN 48
-#define DHT2_PIN 49
+#define DHT1_PIN 10
+#define DHT2_PIN 11
 
 #define PUMP_RELAY_PIN 4  // active LOW
 #define FAN_RELAY_PIN 5   // active LOW (always on)
@@ -322,9 +323,6 @@ bool readDHTSensorsAndSetAverage() {
   float hum2  = readDHT2Humidity();
 
   // both sensors OK
-  averageTemperature = -999;
-  averageHumidity    = -1;
-
   bool dht1Ok = (temp1 != -999.0 && hum1 != -1.0);
   bool dht2Ok = (temp2 != -999.0 && hum2 != -1.0);
 
@@ -367,15 +365,15 @@ bool readDHTSensorsAndSetAverage() {
   averageTemperature = (temp1 + temp2) / 2.0;
   averageHumidity    = (hum1 + hum2) / 2.0;
 
+  Temperature1 = String(temp1);
+  Humidity1    = String(hum1);
+  Temperature2 = String(temp2);
+  Humidity2    = String(hum2);
   // Serial.print("Average Temp: ");
   // Serial.print(averageTemperature);
   // Serial.print(" °C, Average Humidity: ");
   // Serial.print(averageHumidity);
   // Serial.println(" %");
-  Temperature1 = String(temp1);
-  Humidity1    = String(hum1);
-  Temperature2 = String(temp2);
-  Humidity2    = String(hum2);
   return true;
 }
 
@@ -426,9 +424,9 @@ void updateLogLine() {
   ftoa_safe(averageTemperature, t, sizeof(t)); // Convert T1
   ftoa_safe(averageHumidity, h, sizeof(h));    // Convert H1
  // Build CSV log line
-   snprintf(logLine, sizeof(logLine),
-           "%s,%d,%s,%s",
-           timestamp, treatment, t, h); // Build CSV line
+  snprintf(logLine, sizeof(logLine),
+        "%s,T%d,%s,%s",
+        timestamp, treatment, t, h); // Build CSV line
 }
 void saveLogLine() {
   updateTimestamp();
@@ -755,6 +753,7 @@ void setup()
 
   delay(3000);
   showCurrentTreatment();
+  updateStatusLine();
 }
 void exhaustController(){
 
