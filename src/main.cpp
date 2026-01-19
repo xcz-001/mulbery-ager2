@@ -10,42 +10,51 @@
 #include <Servo.h>
 #include "Relay.h"
 
+// ANSI color codes
+#define RESET       "\e[0m"
+#define RED         "\e[31m"
+#define GREEN       "\e[32m"
+#define YELLOW      "\e[33m"
+#define BLUE        "\e[34m"
+#define MAGENTA     "\e[35m"
+#define CYAN        "\e[36m"
+#define BRIGHT_CYAN "\e[1;36m"
+#define BRIGHT_YELLOW "\e[1;33m"
+#define GRAY        "\e[90m"
+
 /* ===================== EEPROM ADDRESSES  ===================== */
-#define LAST_SERVO_UNIXTIME_ADDRESS 10 // EEPROM address to store last servo action time
-#define LAST_SERVO_POSITION_ADDRESS 15 // EEPROM address to store last servo position
+#define LAST_EXHAUST_UNIXTIME_ADDRESS 10 // EEPROM address to store last servo action time
+#define LAST_EXHAUST_STATE_ADDRESS 15 // EEPROM address to store last servo position
 #define LAST_PUMP_UNIXTIME_ADDRESS 20  // EEPROM address to store last pump action time
 #define LAST_PUMP_STATE_ADDRESS 25// EEPROM address to store last pump state
-#define LAST_REF_UNIXTIME_ADDRESS 30   // EEPROM address to store last ref action time
+#define LAST_REF_STATE_ADDRESS 30   // EEPROM address to store last ref action time
 #define LAST_DRUM_UNIXTIME_ADDRESS 40  // EEPROM address to store last drum action time
 #define LAST_DRUM_STATE_ADDRESS 45    // EEPROM address to store last drum state
 #define LAST_TREATMENT_ADDRESS 70     // EEPROM address to store last treatment selection
-#define LAST_LOGGED_TIME_ADDRESS 80    // EEPROM address to store last data logged time
+#define LAST_LOGGED_UNIXTIME_ADDRESS 80    // EEPROM address to store last data logged time
 
 /* ===================== OPERATION VARIABLES ===================== */
-#define UNDER_DEVELOPMENT 1    // 1 = dev, 0 = prod
+// 1 = dev, 0 = prod
+#define UNDER_DEVELOPMENT 0
 
 #if UNDER_DEVELOPMENT
-
-  #define EXHAUST_OPEN_INTERVAL_MINUTES 1
+  #define EXHAUST_OPEN_INTERVAL_MINUTES 30
   #define EXHAUST_OPEN_DURATION_MINUTES 1
-  #define DRUM_ROTATION_INTERVAL_MINUTES 1
+  #define DRUM_ROTATION_INTERVAL_MINUTES 15
   #define DRUM_ROTATION_DURATION_MINUTES 1
-  #define DATA_LOG_INTERVAL_MINUTES 3
+  #define DATA_LOG_INTERVAL_MINUTES 10
   #define SETPOINT_TEMPERATURE_C 50
   #define SERVO_OPEN_ANGLE 90
   #define SERVO_CLOSE_ANGLE 180
-
 #else
-
   #define EXHAUST_OPEN_INTERVAL_MINUTES 30
   #define EXHAUST_OPEN_DURATION_MINUTES 1
   #define DRUM_ROTATION_INTERVAL_MINUTES 15
   #define DRUM_ROTATION_DURATION_MINUTES 1
   #define DATA_LOG_INTERVAL_MINUTES 10
   #define SETPOINT_TEMPERATURE_C 23.0
-  #define SERVO_OPEN_ANGLE
-  #define SERVO_CLOSE_ANGLE 90
-
+  #define SERVO_OPEN_ANGLE 90
+  #define SERVO_CLOSE_ANGLE 180
 #endif
 
 const char *FILENAME = "DATA.CSV"; // SD card filename
@@ -66,8 +75,8 @@ bool inSettings = false;   // are we in treatment menu?
 
 
 unsigned long lastUnixTime = 0;
-unsigned long lastServoUnix = 0;
-unsigned long lastMotorUnix = 0;
+unsigned long lastExhaustUnix = 0;
+unsigned long lastDrumMotorUnix = 0;
 unsigned long lastLoggedUnix = 0;
 unsigned long lastServoMillis = 0;
 bool servoMoved = false;
@@ -81,8 +90,8 @@ bool isDrumMotorOn = false;
 unsigned long MistPumpStartTime = 0;
 unsigned long MistPumpPulseOnDurationMs = 1000;
 bool mistPulseActive = false;
-unsigned long MistPumpOffTime = 0;
-const unsigned long MistPumpPulseOffDurationMs = 1000;
+unsigned long mistPumpOffTime = 0;
+const unsigned long mistPumpPulseOffDurationMs = 1000;
 
 bool lastExhaustState = false;
 bool lastMistingPumpState = false;
@@ -386,7 +395,7 @@ bool readDHTSensorsAndSetAverage() {
   return true;
 }
 
-void sdCardSetup()
+void setupSdCard()
 {
   if (!SD.begin(53))              // Initialize SD (CS pin 53 on Mega)
   {
@@ -458,7 +467,7 @@ void saveLogLine() {
 
 void turnOnDrumMotor()
 {
-  Serial.println("Turning on drum motor");
+  Serial.println("TURNING ON DRUM MOTOR");
   lcdPrintLine(LCD_ACTIVITY_LINE, "TURNING ON DRUM", true);
   delay(LCD_WAIT);
   motorRelay.on();
@@ -466,7 +475,7 @@ void turnOnDrumMotor()
 }
 void turnOffDrumMotor()
 {
-  Serial.println("Turning off drum motor");
+  Serial.println("TURNING OFF DRUM MOTOR");
   lcdPrintLine(LCD_ACTIVITY_LINE, "TURNING OFF DRUM", true);
   delay(LCD_WAIT);
   motorRelay.off();
@@ -490,7 +499,7 @@ void turnOffMistingPump()
   lcdPrintLine(LCD_ACTIVITY_LINE, "PUMP IS OFF", true);
 }
 
-void MistPumpStart() {
+void mistPumpStart() {
   if (!isMistingPumpOn) {
   MistPumpStartTime = millis();
   turnOnMistingPump();
@@ -560,6 +569,7 @@ void closeServo() {
         delay(20); // smooth movement
     }
 
+
     delay(1000); // allow servo to settle
     lcdPrintLine(LCD_ACTIVITY_LINE, "EXHAUST IS CLOSED", true);
     servoMoved = true;
@@ -570,9 +580,12 @@ void closeServo() {
 void setupExhaustServo()
 {
   exhaustServo.attach(SERVO_PWM_PIN);
-  if (isExhaustOpen) {
+  exhaustServo.write(SERVO_CLOSE_ANGLE);
+  if (lastExhaustState) {
     openServo();
+    isExhaustOpen = true;
   } else {
+    isExhaustOpen = true;
     closeServo();
   }
 }
@@ -640,7 +653,7 @@ void updateDhtLine()
     lcdPrintLine(3, String(line), false);
   }
 
-void rtcSetup() {
+void setupRtc() {
     if (!rtc.begin()) {
       Serial.println("Couldn't find RTC");
       // while (1);
@@ -651,6 +664,7 @@ void rtcSetup() {
     }
 
     DateTime now = rtc.now();
+    Serial.print("Current Timestamp:");
     Serial.println(now.timestamp());
 }
 
@@ -668,16 +682,35 @@ void getLastTreatmentFromEEPROM() {
   lastTreatment = treatment;
 }
 
-bool getLastState(byte _address){
-  bool state = false;
-  EEPROM.get(_address, state);
-  return state;
+
+
+void printTimestamp(const char* _prefix, unsigned long _unixTime, bool _newLine = true)
+{
+    DateTime dt(_unixTime);
+    Serial.print("[");
+    Serial.print(_prefix);
+    Serial.print("] ");
+    Serial.print("(");
+    Serial.print(_unixTime);
+    Serial.print(") ");
+    Serial.print(dt.timestamp());
+    if (_newLine) Serial.println();
 }
 
-unsigned long getLastUnixTime(byte _address){
-  unsigned long unixTime = 0;
-  EEPROM.get(_address, unixTime);
-  return unixTime;
+unsigned long writeUnixTime(byte _address, const char* _name){
+    unsigned long _nowUnix = rtc.now().unixtime();
+    EEPROM.put(_address, _nowUnix);
+    Serial.print("[EEPROM WRITE] ");
+    printTimestamp(_name, _nowUnix);
+    return _nowUnix;
+}
+
+unsigned long getLastUnixTime(byte address, const char* _name){
+    unsigned long _unixTime;
+    EEPROM.get(address, _unixTime);
+    Serial.print("[EEPROM READ] ");
+    printTimestamp(_name, _unixTime);
+    return _unixTime;
 }
 
 float minutesElapsed(unsigned long startUnix, unsigned long currentUnix) {
@@ -686,47 +719,34 @@ float minutesElapsed(unsigned long startUnix, unsigned long currentUnix) {
 
     return elapsedMinutes;
 }
-void printTimestamp(unsigned long unixTime, bool newLine = false)//to Serial
-{
-  unsigned long seconds = unixTime % 60;
-  unsigned long minutes = (unixTime / 60) % 60;
-  unsigned long hours   = (unixTime / 3600) % 24;
 
-  if (hours < 10)   Serial.print('0');
-  Serial.print(hours);
-  Serial.print(':');
-
-  if (minutes < 10) Serial.print('0');
-  Serial.print(minutes);
-  Serial.print(':');
-
-  if (seconds < 10) Serial.print('0');
-  Serial.print(seconds);
-
-  if (newLine)
-    Serial.println();
+bool writeState(byte _address, bool _state){
+  EEPROM.write(_address, _state);
+  return _state;
 }
+
+bool getState(byte _address, const char* _name){
+  bool _state = false;
+  EEPROM.get(_address, _state);
+
+  Serial.print("[EEPROM READ] \t");
+  Serial.print(_name);
+  Serial.print("\t :");
+  Serial.println(_state);
+
+  return _state;
+}
+
 
 void getEepromData() {
 
+  lastExhaustUnix = getLastUnixTime(LAST_EXHAUST_UNIXTIME_ADDRESS, "EXHAUST");
+  lastDrumMotorUnix = getLastUnixTime(LAST_DRUM_UNIXTIME_ADDRESS, "DRUM MOTOR");
+  lastLoggedUnix = getLastUnixTime(LAST_LOGGED_UNIXTIME_ADDRESS, "LAST LOGGED");
 
+  lastExhaustState = getState(LAST_EXHAUST_STATE_ADDRESS, "EXHAUST");
+  lastRefState = getState(LAST_REF_STATE_ADDRESS, "COOLER");
 
-  lastMotorUnix = getLastUnixTime(LAST_DRUM_UNIXTIME_ADDRESS);
-  lastLoggedUnix = getLastUnixTime(LAST_LOGGED_TIME_ADDRESS);
-  // lastMistingPumpState
-  isExhaustOpen = getLastState(LAST_SERVO_POSITION_ADDRESS);
-  isDrumMotorOn = getLastState(LAST_DRUM_STATE_ADDRESS);
-
-  Serial.print("LAST LOGGED TIME: ");
-  printTimestamp(lastLoggedUnix);
-  Serial.print(" DRUM MOTOR ");
-  Serial.print(isDrumMotorOn ? "TURNED ON AT " : "TURNED OFF AT ");
-  printTimestamp(lastMotorUnix);
-  Serial.print(" EXHAUST ");
-  Serial.print(isExhaustOpen ? "OPENED AT " : "CLOSED AT ");
-  printTimestamp(lastServoUnix, true);
-
-  // Serial.print(last);
 
   getLastTreatmentFromEEPROM();
 }
@@ -742,44 +762,42 @@ void setup()
 {
   Serial.begin(9600);
   Wire.begin();
-
+  setupLcd();
+  setupRtc();
   setupButton();
   getEepromData();
   setupOutputs();
-  setupLcd();
   setupDht();
   setupExhaustServo();
-  rtcSetup();
-  sdCardSetup();
+  setupSdCard();
 
   pinMode(LED_BUILTIN, OUTPUT);
 
   delay(3000);
   showCurrentTreatment();
+  updateStates();
   updateStatusLine();
+
+
 }
 void exhaustController(){
 
-  float servoElapsedMinutes = minutesElapsed(lastServoUnix, lastUnixTime);
+  float servoElapsedMinutes = minutesElapsed(lastExhaustUnix, lastUnixTime);
   //Serial.print("Servo Elapsed Minutes: ");
   //Serial.println(servoElapsedMinutes, 2);
   if (isExhaustOpen) {
     if (servoElapsedMinutes >= EXHAUST_OPEN_DURATION_MINUTES) {
         closeServo();
         isExhaustOpen = false;
-        lastServoUnix = lastUnixTime; // reset timer
-        //SAVE UNIX TIME TO EEPROM
-        EEPROM.update(LAST_SERVO_UNIXTIME_ADDRESS, lastServoUnix);
-        EEPROM.update(LAST_SERVO_POSITION_ADDRESS, isExhaustOpen);
+        writeState(LAST_EXHAUST_STATE_ADDRESS, isExhaustOpen);
+        lastExhaustUnix = writeUnixTime(LAST_EXHAUST_UNIXTIME_ADDRESS, "EXHAUST");
     }
   } else {
       if (servoElapsedMinutes >= EXHAUST_OPEN_INTERVAL_MINUTES) {
           openServo();
           isExhaustOpen = true;
-          lastServoUnix = lastUnixTime; // reset timer
-          //SAVE UNIX TIME TO EEPROM
-          EEPROM.update(LAST_SERVO_UNIXTIME_ADDRESS, lastServoUnix);
-          EEPROM.update (LAST_SERVO_POSITION_ADDRESS, isExhaustOpen);
+          writeState(LAST_EXHAUST_STATE_ADDRESS, isExhaustOpen);
+          lastExhaustUnix = writeUnixTime(LAST_EXHAUST_UNIXTIME_ADDRESS, "EXHAUST");
       }
   }
   if (servoMoved){
@@ -792,7 +810,7 @@ void exhaustController(){
 }
 
 void drumMotorController(){
-  float motorElapsedMinutes = minutesElapsed(lastMotorUnix, lastUnixTime);
+  float motorElapsedMinutes = minutesElapsed(lastDrumMotorUnix, lastUnixTime);
   //Serial.print("Motor Elapsed Minutes: ");
   //Serial.println(motorElapsedMinutes, 2);
 
@@ -800,20 +818,14 @@ void drumMotorController(){
       if (motorElapsedMinutes >= DRUM_ROTATION_INTERVAL_MINUTES) {
           turnOnDrumMotor();
           isDrumMotorOn = true;
-          lastMotorUnix = lastUnixTime; // reset timer
-          //SAVE UNIX TIME TO EEPROM
-          EEPROM.update(LAST_DRUM_UNIXTIME_ADDRESS, lastMotorUnix);
-          EEPROM.update(LAST_DRUM_STATE_ADDRESS, isDrumMotorOn);
+          lastDrumMotorUnix = writeUnixTime(LAST_DRUM_UNIXTIME_ADDRESS, "DRUM MOTOR");
       }
   } else {
-      float motorElapsedMinutes = minutesElapsed(lastMotorUnix, lastUnixTime);
+      float motorElapsedMinutes = minutesElapsed(lastDrumMotorUnix, lastUnixTime);
       if (motorElapsedMinutes >= DRUM_ROTATION_DURATION_MINUTES) {
           turnOffDrumMotor();
           isDrumMotorOn = false;
-          lastMotorUnix = lastUnixTime; // reset timer
-          //SAVE UNIX TIME TO EEPROM
-          EEPROM.update(LAST_DRUM_UNIXTIME_ADDRESS, lastMotorUnix);
-          EEPROM.update(LAST_DRUM_STATE_ADDRESS, isDrumMotorOn);
+          lastDrumMotorUnix = writeUnixTime(LAST_DRUM_UNIXTIME_ADDRESS, "DRUM MOTOR");
 
       }
   }
@@ -876,7 +888,7 @@ void mistingController(){
 
     // start pulse
     if (!mistPulseActive) {
-      MistPumpStart();
+      mistPumpStart();
       mistPulseActive = true;
     }
 
@@ -884,11 +896,11 @@ void mistingController(){
     if (isMistingPumpOn && millis() - MistPumpStartTime >= MistPumpPulseOnDurationMs) {
       turnOffMistingPump();
       isMistingPumpOn = false;
-      MistPumpOffTime = millis();
+      mistPumpOffTime = millis();
     }
 
     // after OFF delay → read again
-    if (!isMistingPumpOn && mistPulseActive && millis() - MistPumpOffTime >= MistPumpPulseOffDurationMs) {
+    if (!isMistingPumpOn && mistPulseActive && millis() - mistPumpOffTime >= mistPumpPulseOffDurationMs) {
        readDHTSensorsAndSetAverage();
 
       if (averageHumidity >= maxHumidity) {
@@ -922,34 +934,82 @@ void dataLoggingControler(){
       lcdPrintLine(LCD_ACTIVITY_LINE, "LOGGING DATA", true);
       saveLogLine();
       //SAVE UNIX TIME TO EEPROM
-      EEPROM.put(LAST_LOGGED_TIME_ADDRESS, lastUnixTime);
-      lastLoggedUnix = lastUnixTime; // reset timer
+      lastLoggedUnix = writeUnixTime(LAST_LOGGED_UNIXTIME_ADDRESS, "LAST LOGGED");
+      DateTime dt(lastLoggedUnix);
+      lcdPrintLine(LCD_ACTIVITY_LINE, "LAST LOG:"+ String(dt.timestamp(DateTime::TIMESTAMP_TIME)));
   }
 }
 
-void serialMonitorControler(){
-  //unsigned long now = millis();
+void serialMonitorControler() {
+    DateTime now = rtc.now();
 
-  //if (now - SerialLastPrint < 500) return; // 1s rate limit (non-blocking)
-  //SerialLastPrint = now;
+    // Timestamp
+    Serial.print(CYAN);
+    Serial.print(now.timestamp());
+    Serial.print(RESET);
 
-  Serial.print("TIME: ");
-  printTimestamp(lastUnixTime);
+    // Treatment
+    Serial.print(" | Treatment: ");
+    Serial.print(MAGENTA);
+    Serial.print("T");
+    Serial.print(treatment);
+    Serial.print(RESET);
 
-  Serial.print(" | Treatment: T" + String(treatment));
-  // CURRENT HUMIDITY SETTINGS: MIN - MAX
-  Serial.print("\t T1: " + Temperature1 + "\t T2: " + Temperature2 );
-  Serial.print("\t H1: " + Humidity1 + "\t H2: " + Humidity2);
-  Serial.print("\t T_AVE: " + String(averageTemperature) + " °C\t H_AVE: " + String(averageHumidity) + " %\t");
-  Serial.print("\t EXH: " + String(isExhaustOpen));
-  Serial.print(" | DRUM: " + String(isDrumMotorOn));
-  Serial.print(" | COOL: " + String(isRefOn));
-  Serial.print(" | MIST PUMP: " + String(isMistingPumpOn));
-  //Serial.println();
+    // Humidity range
+    Serial.print(" ( ");
+    Serial.print(YELLOW);
+    Serial.print(minimumHumidity());
+    Serial.print("% - ");
+    Serial.print(maximumHumidity());
+    Serial.print("%");
+    Serial.print(RESET);
+    Serial.print(" )");
 
+    // Temperatures
+    Serial.print(" || T1: ");
+    Serial.print(GREEN);
+    Serial.print(Temperature1);
+    Serial.print(RESET);
+    Serial.print("\tT2: ");
+    Serial.print(GREEN);
+    Serial.print(Temperature2);
+    Serial.print(RESET);
 
+    // Humidity readings
+    Serial.print("\tH1: ");
+    Serial.print(BLUE);
+    Serial.print(Humidity1);
+    Serial.print(RESET);
+    Serial.print("\tH2: ");
+    Serial.print(BLUE);
+    Serial.print(Humidity2);
+    Serial.print(RESET);
 
+    // Averages
+    Serial.print("\tT_AVE: ");
+    Serial.print(BRIGHT_CYAN);
+    Serial.print(averageTemperature);
+    Serial.print(" C");
+    Serial.print(RESET);
+    Serial.print("\tH_AVE: ");
+    Serial.print(BRIGHT_CYAN);
+    Serial.print(averageHumidity);
+    Serial.print(" %");
+    Serial.print(RESET);
+    Serial.print(" || ");
 
+    // Status booleans
+    Serial.print("EXHAUST: ");
+    Serial.print(isExhaustOpen ? BRIGHT_YELLOW "1" RESET : GRAY "0" RESET);
+
+    Serial.print(" DRUM MOTOR: ");
+    Serial.print(isDrumMotorOn ? BRIGHT_YELLOW "1" RESET : GRAY "0" RESET);
+
+    Serial.print(" COOLER: ");
+    Serial.print(isRefOn ? BRIGHT_YELLOW "1" RESET : GRAY "0" RESET);
+
+    Serial.print(" MISTING PUMP: ");
+    Serial.print(isMistingPumpOn ? BRIGHT_YELLOW "1" RESET : GRAY "0" RESET);
 
 }
 
@@ -961,13 +1021,13 @@ void loop()
   // exhaustServo.write(180);
   // delay(5000);
 
-  return;
 
   unsigned long currentMillis = millis();
   //TODO:
   //timestamp treatment t1 t2 h1 h2 tave have  outpput
   DateTime now = rtc.now();
   lastUnixTime = now.unixtime();
+
 
   // Temperature and Humidity control
   menuController();
@@ -989,6 +1049,6 @@ void loop()
     }
   }
   unsigned long loopDuration = millis() - currentMillis;
-  Serial.print("\t | LOOP DURATION (ms): ");
+  Serial.print(" || LOOP DURATION (ms): ");
   Serial.println(loopDuration);
 }
