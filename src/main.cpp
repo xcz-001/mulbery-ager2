@@ -26,14 +26,14 @@
 
 #if UNDER_DEVELOPMENT
 
-  #define EXHAUST_OPEN_INTERVAL_MINUTES 2
+  #define EXHAUST_OPEN_INTERVAL_MINUTES 1
   #define EXHAUST_OPEN_DURATION_MINUTES 1
-  #define DRUM_ROTATION_INTERVAL_MINUTES 3
+  #define DRUM_ROTATION_INTERVAL_MINUTES 1
   #define DRUM_ROTATION_DURATION_MINUTES 1
-  #define DATA_LOG_INTERVAL_MINUTES 1
-  #define SETPOINT_TEMPERATURE_C 100.0
-  #define SERVO_OPEN_ANGLE 180
-  #define SERVO_CLOSE_ANGLE 0
+  #define DATA_LOG_INTERVAL_MINUTES 3
+  #define SETPOINT_TEMPERATURE_C 50
+  #define SERVO_OPEN_ANGLE 90
+  #define SERVO_CLOSE_ANGLE 180
 
 #else
 
@@ -43,8 +43,8 @@
   #define DRUM_ROTATION_DURATION_MINUTES 1
   #define DATA_LOG_INTERVAL_MINUTES 10
   #define SETPOINT_TEMPERATURE_C 23.0
-  #define SERVO_OPEN_ANGLE 180
-  #define SERVO_CLOSE_ANGLE 0
+  #define SERVO_OPEN_ANGLE
+  #define SERVO_CLOSE_ANGLE 90
 
 #endif
 
@@ -58,10 +58,19 @@ char logLine[100];                // Full CSV log line
 #define LCD_ACTIVITY_LINE 1 // 2 seconds delay for LCD messages
 
 
+
+/* ===================== MENU VARIABLES ===================== */
+uint8_t treatment = 1;     // currently selected treatmentEEPROM ( saved)
+uint8_t menuSelection = 1; // cursor in menu
+bool inSettings = false;   // are we in treatment menu?
+
+
 unsigned long lastUnixTime = 0;
 unsigned long lastServoUnix = 0;
 unsigned long lastMotorUnix = 0;
 unsigned long lastLoggedUnix = 0;
+unsigned long lastServoMillis = 0;
+bool servoMoved = false;
 
 bool isExhaustOpen = false;
 bool isMistingPumpOn = false;
@@ -84,8 +93,9 @@ String Temperature1, Temperature2, Humidity1, Humidity2;
 float averageTemperature = 0.0;
 float averageHumidity = 0.0;
 
-static unsigned long SerialLastPrint = 0;//speed limiters
-static unsigned long dhtLastPrint = 0;
+//static unsigned long SerialLastPrint = 0;//speed limiters
+ static unsigned long dhtLineLastPrint = 0;//anti flicker on lcd
+// static unsigned long dhtLastRead = 0;
 bool tempLineInitiated = false;
 /* ===================== TREATMENT RANGES ===================== */
 uint8_t treatmentMin[4] = {0, 65, 75, 85}; // index 1-3 corresponds to T1-T3
@@ -99,8 +109,8 @@ uint8_t treatmentMax[4] = {0, 75, 85, 95}; // humidity ranges maxmin
 
 unsigned long menuLastActive = 0; // timestamp of last menu activity
 /* ===================== PIN DEFINITIONS ===================== */
-#define DHT1_PIN 10
-#define DHT2_PIN 11
+#define DHT1_PIN 48
+#define DHT2_PIN 49
 
 #define PUMP_RELAY_PIN 4  // active LOW
 #define FAN_RELAY_PIN 5   // active LOW (always on)
@@ -193,12 +203,6 @@ void setupLcd()
 }
 
 
-
-/* ===================== MENU VARIABLES ===================== */
-uint8_t treatment = 1;     // currently selected treatmentEEPROM ( saved)
-uint8_t menuSelection = 1; // cursor in menu
-bool inSettings = false;   // are we in treatment menu?
-
 /* ===================== UPDATE MENU ===================== */
 void updateTreatmentMenu()
 {
@@ -238,7 +242,6 @@ void showCurrentTreatment()
 /* ===================== BUTTON CALLBACKS ===================== */
 void handleShortPress()
 {
-
   if (inSettings)
   {
     {
@@ -265,7 +268,7 @@ void handleLongPress()
   {
     // Select treatment
     treatment = menuSelection;
-    EEPROM.write(1, treatment); // save selection at address 1
+    EEPROM.write(LAST_TREATMENT_ADDRESS, treatment); // save selection to EEPROM
     inSettings = false;
     showCurrentTreatment();
     lastTreatment = treatment; // sync lastTreatment
@@ -317,6 +320,11 @@ float readDHT2Humidity()
   return readDHTHumidity(dht2);
 }
 bool readDHTSensorsAndSetAverage() {
+  //  unsigned long now = millis();
+
+  //if (now - dhtLastRead < 500) return false; // 1s rate limit (non-blocking)
+
+  // dhtLastRead = now;
   float temp1 = readDHT1Temperature();
   float hum1  = readDHT1Humidity();
   float temp2 = readDHT2Temperature();
@@ -328,7 +336,8 @@ bool readDHTSensorsAndSetAverage() {
 
   // both sensors failed
   if (!dht1Ok && !dht2Ok) {
-    // lcdPrintLine(1, "DHT1 & DHT2 FAIL", true);
+
+    if (!inSettings) lcdPrintLine(LCD_ACTIVITY_LINE, "DHT1 & DHT2 FAIL", true);
     // Serial.println("Both DHT sensors failed!");
     Temperature1 = "ERR";
     Humidity1    = "ERR";
@@ -446,25 +455,6 @@ void saveLogLine() {
     delay(2000);
   }
 }
-void readSensorAndLog()
-{
-  float temp1 = readDHT1Temperature();
-  float hum1 = readDHT1Humidity();
-  float temp2 = readDHT2Temperature();
-  float hum2 = readDHT2Humidity();
-
-  Serial.print("DHT1 - Temp: ");
-  Serial.print(temp1);
-  Serial.print(" °C, Humidity: ");
-  Serial.print(hum1);
-  Serial.print(" % \t");
-
-  Serial.print("DHT2 - Temp: ");
-  Serial.print(temp2);
-  Serial.print(" °C, Humidity: ");
-  Serial.print(hum2);
-  Serial.print(" % \t");
-}
 
 void turnOnDrumMotor()
 {
@@ -543,35 +533,40 @@ void turnOffCoolingSystem()
 //   fanRelay.off();
 //   lcdPrintLine(LCD_ACTIVITY_LINE, "FANS ARE OFF", true);
 // }
-void openServo()
-{
-  servoRelay.on();
-  delay(1000); // allow relay to settle
-  Serial.println("Opening Exhaust Servo");
-  lcdPrintLine(LCD_ACTIVITY_LINE, "OPENING EXHAUST", true);
-  delay(LCD_WAIT);
-  for (int j = SERVO_CLOSE_ANGLE; j < SERVO_OPEN_ANGLE; j += 1)
-  {
-    exhaustServo.write(j);
-    delay(20); // small delay for smooth movement
-  }
-  lcdPrintLine(LCD_ACTIVITY_LINE, "EXHAUST IS OPEN", true);
-}
-void closeServo()
-{
-  Serial.println("Closing Exhaust Servo");
-  lcdPrintLine(LCD_ACTIVITY_LINE, "CLOSING EXHAUST", true);
-  delay(LCD_WAIT);
-  for (int j = SERVO_OPEN_ANGLE; j >= SERVO_CLOSE_ANGLE; j -= 1)
-  {
-    exhaustServo.write(j);
-    delay(20); // small delay for smooth movement
-  }
+void openServo() {
+    servoRelay.on();
+    Serial.println("Opening Exhaust Servo");
+    lcdPrintLine(LCD_ACTIVITY_LINE, "OPENING EXHAUST", true);
+    delay(LCD_WAIT);
 
-  delay(1000); // allow servo to settle
-  lcdPrintLine(LCD_ACTIVITY_LINE, "EXHAUST IS CLOSED", true);
-  //servoRelay.off();
+    for (int angle = SERVO_CLOSE_ANGLE; angle >= SERVO_OPEN_ANGLE; angle--) { // 180 → 0
+        exhaustServo.write(angle);
+        delay(20); // smooth movement
+    }
+
+    lcdPrintLine(LCD_ACTIVITY_LINE, "EXHAUST IS OPEN", true);
+    servoMoved = true;
+    lastServoMillis = millis();
 }
+
+void closeServo() {
+    Serial.println("Closing Exhaust Servo");
+    servoRelay.on();
+    lcdPrintLine(LCD_ACTIVITY_LINE, "CLOSING EXHAUST", true);
+    delay(LCD_WAIT);
+
+    for (int angle = SERVO_OPEN_ANGLE; angle <= SERVO_CLOSE_ANGLE; angle++) { // 0 → 180
+        exhaustServo.write(angle);
+        delay(20); // smooth movement
+    }
+
+    delay(1000); // allow servo to settle
+    lcdPrintLine(LCD_ACTIVITY_LINE, "EXHAUST IS CLOSED", true);
+    servoMoved = true;
+    lastServoMillis = millis();
+}
+
+
 void setupExhaustServo()
 {
   exhaustServo.attach(SERVO_PWM_PIN);
@@ -598,8 +593,8 @@ void updateDhtLine()
   if (inSettings) return; // do not update DHT line if in settings menu
 
   unsigned long now = millis();
-  if (now - dhtLastPrint < 1000) return;
-  dhtLastPrint = now;
+  if (now - dhtLineLastPrint < 1000) return;
+  dhtLineLastPrint = now;
 
   char temperatureString[4];
   char humidityString[4];
@@ -618,7 +613,6 @@ void updateDhtLine()
   }
   if(!tempLineInitiated) {
     lcd.setCursor(0, 2);
-             //0123456789012
     lcd.print("TMP:    ");
     lcd.print(char(223)); // degree symbol
     lcd.print("C HUM:    %");
@@ -649,14 +643,20 @@ void updateDhtLine()
 void rtcSetup() {
     if (!rtc.begin()) {
       Serial.println("Couldn't find RTC");
-      while (1);
+      // while (1);
     }
-    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    if (rtc.lostPower())
+    {
+      rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    }
+
+    DateTime now = rtc.now();
+    Serial.println(now.timestamp());
 }
 
 void getLastTreatmentFromEEPROM() {
   // Load treatment from EEPROM (address 1)
-  uint8_t storedTreatment = EEPROM.read(1);
+  uint8_t storedTreatment = EEPROM.read(LAST_TREATMENT_ADDRESS);
   if (storedTreatment >= 1 && storedTreatment <= 3)
     treatment = storedTreatment;
   else
@@ -708,7 +708,9 @@ void printTimestamp(unsigned long unixTime, bool newLine = false)//to Serial
 }
 
 void getEepromData() {
-  lastServoUnix = getLastUnixTime(LAST_SERVO_UNIXTIME_ADDRESS);
+
+
+
   lastMotorUnix = getLastUnixTime(LAST_DRUM_UNIXTIME_ADDRESS);
   lastLoggedUnix = getLastUnixTime(LAST_LOGGED_TIME_ADDRESS);
   // lastMistingPumpState
@@ -729,12 +731,13 @@ void getEepromData() {
   getLastTreatmentFromEEPROM();
 }
 
-void UpdateStates(){
+void updateStates(){
   lastExhaustState = isExhaustOpen;
   lastMistingPumpState = isMistingPumpOn;
   lastRefState = isRefOn;
   lastDrumMotorState = isDrumMotorOn;
 }
+
 void setup()
 {
   Serial.begin(9600);
@@ -779,6 +782,13 @@ void exhaustController(){
           EEPROM.update (LAST_SERVO_POSITION_ADDRESS, isExhaustOpen);
       }
   }
+  if (servoMoved){
+    if (millis() - lastServoMillis >= 10000){
+      servoRelay.off();
+      servoMoved = false;
+      lastServoMillis = 0;
+    }
+  }
 }
 
 void drumMotorController(){
@@ -793,7 +803,7 @@ void drumMotorController(){
           lastMotorUnix = lastUnixTime; // reset timer
           //SAVE UNIX TIME TO EEPROM
           EEPROM.update(LAST_DRUM_UNIXTIME_ADDRESS, lastMotorUnix);
-          EEPROM.put(LAST_DRUM_STATE_ADDRESS, isDrumMotorOn);
+          EEPROM.update(LAST_DRUM_STATE_ADDRESS, isDrumMotorOn);
       }
   } else {
       float motorElapsedMinutes = minutesElapsed(lastMotorUnix, lastUnixTime);
@@ -803,7 +813,7 @@ void drumMotorController(){
           lastMotorUnix = lastUnixTime; // reset timer
           //SAVE UNIX TIME TO EEPROM
           EEPROM.update(LAST_DRUM_UNIXTIME_ADDRESS, lastMotorUnix);
-          EEPROM.put(LAST_DRUM_STATE_ADDRESS, isDrumMotorOn);
+          EEPROM.update(LAST_DRUM_STATE_ADDRESS, isDrumMotorOn);
 
       }
   }
@@ -814,6 +824,7 @@ void menuController(){
     button.tick();
     if (!inSettings && lastTreatment != treatment)
     {
+      tempLineInitiated = false;
       lcd.setCursor(0, 1);
       lcd.print("                    "); // clear previous text
       lcd.setCursor(0, 1);
@@ -824,10 +835,18 @@ void menuController(){
     // Exit menu if timeout reached
     if (inSettings && millis() - menuLastActive >= MENU_TIMEOUT_MS)
     {
+      tempLineInitiated = false;
       inSettings = false;
+      lcd.noCursor();
+      lcd.noBlink();
       showCurrentTreatment();
       lastTreatment = treatment;
       Serial.println("Menu Timeout - Returning to Current Treatment");
+    }
+
+    if (!inSettings && tempLineInitiated) {
+      tempLineInitiated = false;
+      updateStatusLine();
     }
 }
 
@@ -902,20 +921,21 @@ void dataLoggingControler(){
   if (logElapsedMinutes >= DATA_LOG_INTERVAL_MINUTES) {
       lcdPrintLine(LCD_ACTIVITY_LINE, "LOGGING DATA", true);
       saveLogLine();
-      lastLoggedUnix = lastUnixTime; // reset timer
       //SAVE UNIX TIME TO EEPROM
-      EEPROM.update(LAST_LOGGED_TIME_ADDRESS, lastLoggedUnix);
+      EEPROM.put(LAST_LOGGED_TIME_ADDRESS, lastUnixTime);
+      lastLoggedUnix = lastUnixTime; // reset timer
   }
 }
 
 void serialMonitorControler(){
-  unsigned long now = millis();
+  //unsigned long now = millis();
 
-  if (now - SerialLastPrint < 500) return; // 1s rate limit (non-blocking)
-  SerialLastPrint = now;
+  //if (now - SerialLastPrint < 500) return; // 1s rate limit (non-blocking)
+  //SerialLastPrint = now;
 
   Serial.print("TIME: ");
   printTimestamp(lastUnixTime);
+
   Serial.print(" | Treatment: T" + String(treatment));
   // CURRENT HUMIDITY SETTINGS: MIN - MAX
   Serial.print("\t T1: " + Temperature1 + "\t T2: " + Temperature2 );
@@ -925,31 +945,50 @@ void serialMonitorControler(){
   Serial.print(" | DRUM: " + String(isDrumMotorOn));
   Serial.print(" | COOL: " + String(isRefOn));
   Serial.print(" | MIST PUMP: " + String(isMistingPumpOn));
-  Serial.println();
+  //Serial.println();
+
+
+
+
+
 }
 
 /* ===================== LOOP ===================== */
 void loop()
 {
+  // exhaustServo.write(0);
+  // delay(5000);
+  // exhaustServo.write(180);
+  // delay(5000);
+
+  return;
+
+  unsigned long currentMillis = millis();
   //TODO:
   //timestamp treatment t1 t2 h1 h2 tave have  outpput
   DateTime now = rtc.now();
   lastUnixTime = now.unixtime();
 
   // Temperature and Humidity control
-  readDHTSensorsAndSetAverage();
   menuController();
-  exhaustController();
-  drumMotorController();
-  coolerController();
-  mistingController();
-  dataLoggingControler();
 
-  serialMonitorControler();
-  updateDhtLine();
-  if (statusChanged())
-  {
-    updateStatusLine();
-    UpdateStates();
+  if (!inSettings){
+    readDHTSensorsAndSetAverage();
+    exhaustController();
+    drumMotorController();
+    coolerController();
+    mistingController();
+    dataLoggingControler();
+
+    serialMonitorControler();
+    updateDhtLine();
+    if (statusChanged())
+    {
+      updateStatusLine();
+      updateStates();
+    }
   }
+  unsigned long loopDuration = millis() - currentMillis;
+  Serial.print("\t | LOOP DURATION (ms): ");
+  Serial.println(loopDuration);
 }

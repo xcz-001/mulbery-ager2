@@ -167,10 +167,10 @@ TERMINAL BLOCK 2
 
 ## Basic Troubleshooting
 
-### LCD Shows ERR
-- One or both DHT sensors failed
-- Unplug then plugin. ensure not to switch polarities.(red +, blue -)
-- Check wiring, power, and signal connectivity to D49, D50
+### LCD Shows "DHT1 & DHT2 fAIL"
+- Both DHT sensors failed
+- Check wiring, power and signal connectivity to D48, D49
+- Restart prototype; turn off then on the main power switch.
 
 ### Misting Pump Not Turning On
 - Humidity above minimum
